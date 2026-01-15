@@ -94,6 +94,7 @@ class AnalysisResult:
     key_points: str = ""  # 核心看点（3-5个要点）
     risk_warning: str = ""  # 风险提示
     buy_reason: str = ""  # 买入/卖出理由
+    visual_chart: str = ""  # 可视化总结图（Mermaid 代码）
     
     # ========== 元数据 ==========
     raw_response: Optional[str] = None  # 原始响应（调试用）
@@ -129,6 +130,7 @@ class AnalysisResult:
             'key_points': self.key_points,
             'risk_warning': self.risk_warning,
             'buy_reason': self.buy_reason,
+            'visual_chart': self.visual_chart,
             'search_performed': self.search_performed,
             'success': self.success,
             'error_message': self.error_message,
@@ -344,7 +346,9 @@ class GeminiAnalyzer:
     "hot_topics": "相关热点",
     
     "search_performed": true/false,
-    "data_sources": "数据来源说明"
+    "data_sources": "数据来源说明",
+    
+    "visual_chart": "【重要】用 Mermaid 语法输出一张 200 字以内的决策总结图（格式：graph TD; ...），需包含多空对比、支撑位、核心建议。禁止输出代码块符号。"
 }
 ```
 
@@ -1073,6 +1077,7 @@ class GeminiAnalyzer:
                     key_points=data.get('key_points', ''),
                     risk_warning=data.get('risk_warning', ''),
                     buy_reason=data.get('buy_reason', ''),
+                    visual_chart=data.get('visual_chart', ''),
                     # 元数据
                     search_performed=data.get('search_performed', False),
                     data_sources=data.get('data_sources', '技术面数据'),

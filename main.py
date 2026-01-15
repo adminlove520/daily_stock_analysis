@@ -619,6 +619,8 @@ class StockAnalysisPipeline:
                         non_wechat_success = self.notifier.send_to_email(report) or non_wechat_success
                     elif channel == NotificationChannel.CUSTOM:
                         non_wechat_success = self.notifier.send_to_custom(report) or non_wechat_success
+                    elif channel == NotificationChannel.DISCORD:
+                        non_wechat_success = self.notifier.send_to_discord(report) or non_wechat_success
                     else:
                         logger.warning(f"未知通知渠道: {channel}")
 

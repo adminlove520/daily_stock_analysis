@@ -20,6 +20,7 @@ lark-oapi>=1.0.0             # 飞书API
 # 数据处理
 pandas>=2.0.0               # 数据分析
 numpy>=1.24.0               # 数值计算
+Pillow>=10.0.0              # 图形报表生成 (Decision Card)
 
 # AI 分析
 google-generativeai>=0.8.0  # Gemini API

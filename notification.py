@@ -650,8 +650,20 @@ class NotificationService:
                         "",
                     ])
                     for item in checklist:
-                        report_lines.append(f"- {item}")
+                        report_lines.append(item)
                     report_lines.append("")
+                
+                # ========== 📈 决策总结图 (Mermaid) ==========
+                visual_chart = result.visual_chart if hasattr(result, 'visual_chart') else ""
+                if visual_chart and "graph" in visual_chart:
+                    chart_url = self._get_mermaid_url(visual_chart)
+                    if chart_url:
+                        report_lines.extend([
+                            "### 📈 决策总结图",
+                            "",
+                            f"![决策总结图]({chart_url})",
+                            "",
+                        ])
             
             # 如果没有 dashboard，显示传统格式
             if not dashboard:
@@ -1798,20 +1810,63 @@ class NotificationService:
             color = 0xf1c40f # Gold
 
         # 截断描述以防超限 (Discord Embed 限制 4096)
-        description = description[:4000]
+        description_truncated = description[:4000] + ("..." if len(description) > 4000 else "")
         
+        # 尝试提取第一个图片 URL (用于显示总结图)
+        import re
+        image_url = None
+        match = re.search(r'!\[.*?\]\((https?://.*?)\)', description)
+        if match:
+            image_url = match.group(1)
+            # 为了美观，可以在描述中移除图片链接占位符（可选）
+            # description_truncated = description_truncated.replace(match.group(0), "").strip()
+
+        # 最终组装数据
         payload = {
-            "embeds": [{
-                "title": title,
-                "description": description,
-                "color": color,
-                "footer": {
-                    "text": f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            "embeds": [
+                {
+                    "title": title,
+                    "description": description_truncated,
+                    "color": color,
+                    "timestamp": datetime.utcnow().isoformat()
                 }
-            }]
+            ]
         }
+        
+        if image_url:
+            payload["embeds"][0]["image"] = {"url": image_url}
+        
         return payload
 
+    def _get_mermaid_url(self, mermaid_code: str) -> Optional[str]:
+        """
+        将 Mermaid 代码转换为 mermaid.ink 的图片 URL
+        """
+        try:
+            import base64
+            import json
+            
+            # 清理代码
+            code = mermaid_code.strip()
+            if code.startswith('```'):
+                code = '\n'.join(code.split('\n')[1:-1])
+            
+            # 移除可能存在的干扰字符
+            code = code.replace('"', "'")
+            
+            # 构造 mermaid.ink 兼容的 JSON
+            j_str = json.dumps({"code": code, "mermaid": {"theme": "default"}})
+            
+            sample_string_bytes = j_str.encode("utf-8")
+            base64_bytes = base64.urlsafe_b64encode(sample_string_bytes)
+            base64_string = base64_bytes.decode("utf-8").replace("=", "")
+            
+            return f"https://mermaid.ink/img/{base64_string}"
+            
+        except Exception as e:
+            logger.warning(f"生成 Mermaid URL 失败: {e}")
+            return None
+    
     def _build_custom_webhook_payload(self, url: str, content: str) -> dict:
         """
         根据 URL 构建对应的 Webhook payload

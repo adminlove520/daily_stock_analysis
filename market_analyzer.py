@@ -86,14 +86,14 @@ class MarketAnalyzer:
     5. 生成大盘复盘报告
     """
     
-    # 主要指数代码
+    # 主要指数代码 (参考 PR #34 更新)
     MAIN_INDICES = {
-        '000001': '上证指数',
-        '399001': '深证成指',
-        '399006': '创业板指',
-        '000688': '科创50',
-        '000016': '上证50',
-        '000300': '沪深300',
+        'sh000001': '上证指数',
+        'sz399001': '深证成指',
+        'sz399006': '创业板指',
+        'sh000688': '科创50',
+        'sh000016': '上证50',
+        'sh000300': '沪深300',
     }
     
     def __init__(self, search_service: Optional[SearchService] = None, analyzer=None):
@@ -127,43 +127,45 @@ class MarketAnalyzer:
         # 3. 获取板块涨跌榜
         self._get_sector_rankings(overview)
         
-        # 4. 获取北向资金（可选）
-        self._get_north_flow(overview)
+        # 4. 获取北向资金（政策原因暂时关闭，逻辑留存）
+        # self._get_north_flow(overview)
         
         return overview
     
     def _get_main_indices(self) -> List[MarketIndex]:
-        """获取主要指数实时行情"""
+        """获取主要指数实时行情 (切换为新浪接口以支持深市指数)"""
         indices = []
         
         try:
-            logger.info("[大盘] 获取主要指数实时行情...")
+            logger.info("[大盘] 获取主要指数行情 (Sina)...")
             
-            # 使用 akshare 获取指数行情
-            df = ak.stock_zh_index_spot_em()
+            # 使用 akshare 获取指数行情（新浪接口支持带 sh/sz 的代码）
+            df = ak.stock_zh_index_spot_sina()
             
             if df is not None and not df.empty:
-                for code, name in self.MAIN_INDICES.items():
-                    # 查找对应指数
-                    row = df[df['代码'] == code]
+                for code_with_prefix, name in self.MAIN_INDICES.items():
+                    # 新浪接口返回的是 code 列不带前缀，但我们可以通过其他方式匹配
+                    # 或者直接过滤
+                    code_only = code_with_prefix[2:] # 000001
+                    
+                    row = df[df['code'] == code_with_prefix] # 某些版本直接带前缀
                     if row.empty:
-                        # 尝试带前缀查找
-                        row = df[df['代码'].str.contains(code)]
+                        row = df[df['code'] == code_only]
                     
                     if not row.empty:
                         row = row.iloc[0]
                         index = MarketIndex(
-                            code=code,
+                            code=code_with_prefix,
                             name=name,
-                            current=float(row.get('最新价', 0) or 0),
-                            change=float(row.get('涨跌额', 0) or 0),
-                            change_pct=float(row.get('涨跌幅', 0) or 0),
-                            open=float(row.get('今开', 0) or 0),
-                            high=float(row.get('最高', 0) or 0),
-                            low=float(row.get('最低', 0) or 0),
-                            prev_close=float(row.get('昨收', 0) or 0),
-                            volume=float(row.get('成交量', 0) or 0),
-                            amount=float(row.get('成交额', 0) or 0),
+                            current=float(row.get('price', 0) or 0),
+                            change=float(row.get('change', 0) or 0),
+                            change_pct=float(row.get('percentage', 0) or 0),
+                            open=float(row.get('open', 0) or 0),
+                            high=float(row.get('high', 0) or 0),
+                            low=float(row.get('low', 0) or 0),
+                            prev_close=float(row.get('last_close', 0) or 0),
+                            volume=float(row.get('volume', 0) or 0),
+                            amount=float(row.get('amount', 0) or 0),
                         )
                         # 计算振幅
                         if index.prev_close > 0:
@@ -246,22 +248,39 @@ class MarketAnalyzer:
             logger.error(f"[大盘] 获取板块涨跌榜失败: {e}")
     
     def _get_north_flow(self, overview: MarketOverview):
-        """获取北向资金流入"""
+        """获取北向资金流入 (增加鲁棒性)"""
         try:
             logger.info("[大盘] 获取北向资金...")
             
-            # 获取北向资金数据
-            df = ak.stock_hsgt_north_net_flow_in_em(symbol="北上")
+            df = None
+            # 尝试接口 1 (最新/最常用)
+            try:
+                if hasattr(ak, 'stock_hsgt_north_net_flow_in_em'):
+                    df = ak.stock_hsgt_north_net_flow_in_em(symbol="北上")
+                elif hasattr(ak, 'stock_em_hsgt_north_net_flow_in'):
+                    df = ak.stock_em_hsgt_north_net_flow_in(indicator="北向")
+            except:
+                pass
+
+            if df is None or df.empty:
+                # 尝试接口 2 (直接获取统计数据)
+                try:
+                    df = ak.stock_hsgt_board_rank_em(symbol="北向资金")
+                except:
+                    pass
             
             if df is not None and not df.empty:
-                # 取最新一条数据
-                latest = df.iloc[-1]
+                # 针对不同接口解析字段
                 if '当日净流入' in df.columns:
-                    overview.north_flow = float(latest['当日净流入']) / 1e8  # 转为亿元
+                    overview.north_flow = float(df.iloc[-1]['当日净流入']) / 1e8
+                elif '今日' in df.columns: # 某些排名接口
+                    overview.north_flow = float(df.iloc[0]['今日']) / 1e4 # 可能是万为单位
                 elif '净流入' in df.columns:
-                    overview.north_flow = float(latest['净流入']) / 1e8
+                    overview.north_flow = float(df.iloc[-1]['净流入']) / 1e8
                     
-                logger.info(f"[大盘] 北向资金净流入: {overview.north_flow:.2f}亿")
+                logger.info(f"[大盘] 北向资金获取成功: {overview.north_flow:.2f}亿")
+            else:
+                logger.warning("[大盘] 所有北向资金接口均返回为空")
                 
         except Exception as e:
             logger.warning(f"[大盘] 获取北向资金失败: {e}")
