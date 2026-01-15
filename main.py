@@ -262,6 +262,16 @@ class StockAnalysisPipeline:
             except Exception as e:
                 logger.warning(f"[{code}] 获取筹码分布失败: {e}")
             
+            # Step 2.5: 获取资金流向
+            money_flow: Optional[Dict[str, Any]] = None
+            try:
+                money_flow = self.akshare_fetcher.get_money_flow(code)
+                if money_flow:
+                    logger.info(f"[{code}] 资金流向: 主力净流入={money_flow.get('main_net_inflow', 0)/10000:.2f}万, "
+                              f"占比={money_flow.get('main_net_inflow_pct', 0):.2f}%")
+            except Exception as e:
+                logger.warning(f"[{code}] 获取资金流向失败: {e}")
+            
             # Step 3: 趋势分析（基于交易理念）
             trend_result: Optional[TrendAnalysisResult] = None
             try:
@@ -314,6 +324,7 @@ class StockAnalysisPipeline:
                 realtime_quote, 
                 chip_data, 
                 trend_result,
+                money_flow,
                 stock_name  # 传入股票名称
             )
             
@@ -333,6 +344,7 @@ class StockAnalysisPipeline:
         realtime_quote: Optional[RealtimeQuote],
         chip_data: Optional[ChipDistribution],
         trend_result: Optional[TrendAnalysisResult],
+        money_flow: Optional[Dict[str, Any]] = None,
         stock_name: str = ""
     ) -> Dict[str, Any]:
         """
@@ -383,6 +395,10 @@ class StockAnalysisPipeline:
                 'concentration_70': chip_data.concentration_70,
                 'chip_status': chip_data.get_chip_status(current_price),
             }
+        
+        # 添加资金流向
+        if money_flow:
+            enhanced['money_flow'] = money_flow
         
         # 添加趋势分析结果
         if trend_result:
@@ -498,9 +514,12 @@ class StockAnalysisPipeline:
         """
         start_time = time.time()
         
-        # 使用配置中的股票列表
+        # 使用配置中的股票列表并合并数据库中的自选股
         if stock_codes is None:
-            stock_codes = self.config.stock_list
+            config_stocks = self.config.stock_list
+            db_stocks = [s['code'] for s in self.db.get_watchlist()]
+            # 去重合并
+            stock_codes = list(dict.fromkeys(config_stocks + db_stocks))
         
         if not stock_codes:
             logger.error("未配置自选股列表，请在 .env 文件中设置 STOCK_LIST")

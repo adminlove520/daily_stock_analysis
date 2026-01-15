@@ -40,6 +40,7 @@ class NotificationChannel(Enum):
     TELEGRAM = "telegram"  # Telegram
     EMAIL = "email"        # 邮件
     CUSTOM = "custom"      # 自定义 Webhook
+    DISCORD = "discord"    # Discord 机器人 (Bot)
     UNKNOWN = "unknown"    # 未知
 
 
@@ -83,6 +84,7 @@ class ChannelDetector:
             NotificationChannel.TELEGRAM: "Telegram",
             NotificationChannel.EMAIL: "邮件",
             NotificationChannel.CUSTOM: "自定义Webhook",
+            NotificationChannel.DISCORD: "Discord机器人",
             NotificationChannel.UNKNOWN: "未知渠道",
         }
         return names.get(channel, "未知渠道")
@@ -134,6 +136,13 @@ class NotificationService:
         # 自定义 Webhook 配置
         self._custom_webhook_urls = getattr(config, 'custom_webhook_urls', []) or []
         
+        # Discord 配置
+        self._discord_config = {
+            'bot_token': getattr(config, 'discord_bot_token', None),
+            'channel_id': getattr(config, 'discord_main_channel_id', None),
+            'webhook_url': getattr(config, 'discord_webhook_url', None),
+        }
+        
         # 消息长度限制（字节）
         self._feishu_max_bytes = getattr(config, 'feishu_max_bytes', 20000)
         self._wechat_max_bytes = getattr(config, 'wechat_max_bytes', 4000)
@@ -176,11 +185,22 @@ class NotificationService:
         if self._custom_webhook_urls:
             channels.append(NotificationChannel.CUSTOM)
         
+        # Discord
+        if self._is_discord_configured():
+            channels.append(NotificationChannel.DISCORD)
+        
         return channels
     
     def _is_telegram_configured(self) -> bool:
         """检查 Telegram 配置是否完整"""
         return bool(self._telegram_config['bot_token'] and self._telegram_config['chat_id'])
+    
+    def _is_discord_configured(self) -> bool:
+        """检查 Discord 配置是否完整（支持 Bot 或 Webhook）"""
+        # 只要配置了 Webhook 或完整的 Bot Token+Channel，即视为可用
+        bot_ok = bool(self._discord_config['bot_token'] and self._discord_config['channel_id'])
+        webhook_ok = bool(self._discord_config['webhook_url'])
+        return bot_ok or webhook_ok
     
     def _is_email_configured(self) -> bool:
         """检查邮件配置是否完整（只需邮箱和授权码）"""
@@ -1702,6 +1722,96 @@ class NotificationService:
         logger.info(f"自定义 Webhook 推送完成：成功 {success_count}/{len(self._custom_webhook_urls)}")
         return success_count > 0
     
+    def send_to_discord(self, content: str) -> bool:
+        """
+        推送消息到 Discord
+        
+        支持通过 Webhook 或 Bot Token 发送。
+        优先使用 Webhook，因为它更简单且支持更好的 Embed。
+        """
+        if not self._is_discord_configured():
+            logger.warning("Discord 未配置，跳过推送")
+            return False
+        
+        # 1. 优先尝试 Webhook 发送
+        if self._discord_config['webhook_url']:
+            try:
+                payload = self._build_discord_embed_payload(content)
+                headers = {'Content-Type': 'application/json'}
+                response = requests.post(
+                    self._discord_config['webhook_url'],
+                    json=payload,
+                    timeout=30
+                )
+                if response.status_code in [200, 204]:
+                    logger.info("Discord Webhook 推送成功")
+                    return True
+                else:
+                    logger.error(f"Discord Webhook 推送失败: HTTP {response.status_code}")
+            except Exception as e:
+                logger.error(f"Discord Webhook 推送异常: {e}")
+
+        # 2. 如果 Webhook 失败或未配置，且配置了 Bot Token，则作为兜底（这里通过简单的 API 调用实现）
+        if self._discord_config['bot_token'] and self._discord_config['channel_id']:
+            try:
+                # 简单实现：使用 Discord REST API 直接发送 content
+                url = f"https://discord.com/api/v10/channels/{self._discord_config['channel_id']}/messages"
+                headers = {
+                    "Authorization": f"Bot {self._discord_config['bot_token']}",
+                    "Content-Type": "application/json"
+                }
+                truncated = content[:1900] + "..." if len(content) > 1900 else content
+                payload = {"content": truncated}
+                
+                response = requests.post(url, json=payload, headers=headers, timeout=30)
+                if response.status_code in [200, 201]:
+                    logger.info("Discord Bot API 推送成功")
+                    return True
+                else:
+                    logger.error(f"Discord Bot API 推送失败: HTTP {response.status_code}")
+            except Exception as e:
+                logger.error(f"Discord Bot API 推送异常: {e}")
+                
+        return False
+
+    def _build_discord_embed_payload(self, content: str) -> dict:
+        """
+        将 Markdown 报告转换为 Discord Embed Payload
+        """
+        # 提取标题
+        title = "股票分析报告"
+        description = content
+        
+        first_line = content.split('\n')[0]
+        if first_line.startswith('# '):
+            title = first_line.replace('# ', '').strip()
+            description = '\n'.join(content.split('\n')[1:]).strip()
+        
+        # 设置颜色（根据内容关键词简单判断）
+        color = 0x3498db # Blue
+        content_lower = content.lower()
+        if any(w in content_lower for w in ['买入', '加仓', '强烈买入', '🟢']):
+            color = 0x2ecc71 # Green
+        elif any(w in content_lower for w in ['卖出', '减仓', '强烈卖出', '🔴']):
+            color = 0xe74c3c # Red
+        elif any(w in content_lower for w in ['持有', '观望', '🟡']):
+            color = 0xf1c40f # Gold
+
+        # 截断描述以防超限 (Discord Embed 限制 4096)
+        description = description[:4000]
+        
+        payload = {
+            "embeds": [{
+                "title": title,
+                "description": description,
+                "color": color,
+                "footer": {
+                    "text": f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                }
+            }]
+        }
+        return payload
+
     def _build_custom_webhook_payload(self, url: str, content: str) -> dict:
         """
         根据 URL 构建对应的 Webhook payload
@@ -1722,11 +1832,7 @@ class NotificationService:
         
         # Discord Webhook
         if 'discord.com/api/webhooks' in url_lower or 'discordapp.com/api/webhooks' in url_lower:
-            # Discord 限制 2000 字符
-            truncated = content[:1900] + "..." if len(content) > 1900 else content
-            return {
-                "content": truncated
-            }
+            return self._build_discord_embed_payload(content)
         
         # Slack Incoming Webhook
         if 'hooks.slack.com' in url_lower:
@@ -1786,6 +1892,8 @@ class NotificationService:
                     result = self.send_to_email(content)
                 elif channel == NotificationChannel.CUSTOM:
                     result = self.send_to_custom(content)
+                elif channel == NotificationChannel.DISCORD:
+                    result = self.send_to_discord(content)
                 else:
                     logger.warning(f"不支持的通知渠道: {channel}")
                     result = False

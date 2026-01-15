@@ -103,7 +103,7 @@ class StockDaily(Base):
         """转换为字典"""
         return {
             'code': self.code,
-            'date': self.date,
+            'date': self.date.isoformat() if isinstance(self.date, (date, datetime)) else self.date,
             'open': self.open,
             'high': self.high,
             'low': self.low,
@@ -117,6 +117,24 @@ class StockDaily(Base):
             'volume_ratio': self.volume_ratio,
             'data_source': self.data_source,
         }
+
+
+class Watchlist(Base):
+    """
+    自选股管理模型
+    
+    用于存储用户动态添加的自选股
+    """
+    __tablename__ = 'watchlist'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(10), nullable=False, unique=True, index=True)
+    name = Column(String(50))
+    added_at = Column(DateTime, default=datetime.now)
+    comment = Column(String(200)) # 备注信息
+    
+    def __repr__(self):
+        return f"<Watchlist(code={self.code}, name={self.name})>"
 
 
 class DatabaseManager:
@@ -201,6 +219,72 @@ class DatabaseManager:
         except Exception:
             session.close()
             raise
+
+    # === 自选股管理接口 ===
+
+    def add_to_watchlist(self, code: str, name: Optional[str] = None, comment: Optional[str] = None) -> bool:
+        """
+        添加股票到自选列表
+        """
+        with self.get_session() as session:
+            try:
+                # 检查是否已存在
+                existing = session.execute(
+                    select(Watchlist).where(Watchlist.code == code)
+                ).scalar_one_or_none()
+                
+                if existing:
+                    if name: existing.name = name
+                    if comment: existing.comment = comment
+                    logger.info(f"更新自选股: {code}")
+                else:
+                    item = Watchlist(code=code, name=name, comment=comment)
+                    session.add(item)
+                    logger.info(f"添加自选股: {code}")
+                
+                session.commit()
+                return True
+            except Exception as e:
+                session.rollback()
+                logger.error(f"添加自选股失败: {e}")
+                return False
+
+    def remove_from_watchlist(self, code: str) -> bool:
+        """
+        从自选列表移除股票
+        """
+        with self.get_session() as session:
+            try:
+                item = session.execute(
+                    select(Watchlist).where(Watchlist.code == code)
+                ).scalar_one_or_none()
+                
+                if item:
+                    session.delete(item)
+                    session.commit()
+                    logger.info(f"删除自选股: {code}")
+                    return True
+                return False
+            except Exception as e:
+                session.rollback()
+                logger.error(f"删除自选股失败: {e}")
+                return False
+
+    def get_watchlist(self) -> List[Dict[str, Any]]:
+        """
+        获取所有自选股
+        """
+        with self.get_session() as session:
+            results = session.execute(select(Watchlist).order_by(Watchlist.added_at)).scalars().all()
+            return [
+                {
+                    'code': item.code,
+                    'name': item.name,
+                    'added_at': item.added_at.isoformat(),
+                    'comment': item.comment
+                }
+                for item in results
+            ]
     
     def has_today_data(self, code: str, target_date: Optional[date] = None) -> bool:
         """

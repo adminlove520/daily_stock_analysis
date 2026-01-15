@@ -42,5 +42,8 @@ VOLUME ["/app/data", "/app/logs", "/app/reports"]
 HEALTHCHECK --interval=5m --timeout=10s --start-period=30s --retries=3 \
     CMD python -c "import sys; sys.exit(0)"
 
-# 默认命令（可被覆盖）
-CMD ["python", "main.py", "--schedule"]
+# 默认命令（可通过环境变量 MODE 切换）
+# MODE=BOT 启动 Discord 机器人
+# MODE=SCHEDULE 启动定时分析任务
+# 默认为 SCHEDULE
+CMD ["sh", "-c", "if [ \"$MODE\" = \"BOT\" ]; then python discord_bot.py; else python main.py --schedule; fi"]

@@ -70,6 +70,11 @@ class Config:
     telegram_bot_token: Optional[str] = None  # Bot Token（@BotFather 获取）
     telegram_chat_id: Optional[str] = None  # Chat ID
     
+    # Discord 配置
+    discord_bot_token: Optional[str] = None
+    discord_main_channel_id: Optional[str] = None # 用于推送日报的默认频道
+    discord_webhook_url: Optional[str] = None      # 兼容 Webhook 推送
+    
     # 邮件配置（只需邮箱和授权码，SMTP 自动识别）
     email_sender: Optional[str] = None  # 发件人邮箱
     email_password: Optional[str] = None  # 邮箱密码/授权码
@@ -145,15 +150,24 @@ class Config:
         
         # 解析自选股列表（逗号分隔）
         stock_list_str = os.getenv('STOCK_LIST', '')
-        stock_list = [
+        env_stock_list = [
             code.strip() 
             for code in stock_list_str.split(',') 
             if code.strip()
         ]
         
+        # 尝试从数据库加载动态自选股
+        db_stock_list = []
+        try:
+            # 这里由于循环引用问题，我们不在这里直接调用 storage.py
+            # 而是由外部在使用 stock_list 时决定是否合并
+            pass
+        except:
+            pass
+            
         # 如果没有配置，使用默认的示例股票
-        if not stock_list:
-            stock_list = ['600519', '000001', '300750']
+        if not env_stock_list:
+            env_stock_list = ['600519', '000001', '300750']
         
         # 解析搜索引擎 API Keys（支持多个 key，逗号分隔）
         tavily_keys_str = os.getenv('TAVILY_API_KEYS', '')
@@ -163,7 +177,7 @@ class Config:
         serpapi_keys = [k.strip() for k in serpapi_keys_str.split(',') if k.strip()]
         
         return cls(
-            stock_list=stock_list,
+            stock_list=env_stock_list,
             feishu_app_id=os.getenv('FEISHU_APP_ID'),
             feishu_app_secret=os.getenv('FEISHU_APP_SECRET'),
             feishu_folder_token=os.getenv('FEISHU_FOLDER_TOKEN'),
@@ -183,6 +197,9 @@ class Config:
             feishu_webhook_url=os.getenv('FEISHU_WEBHOOK_URL'),
             telegram_bot_token=os.getenv('TELEGRAM_BOT_TOKEN'),
             telegram_chat_id=os.getenv('TELEGRAM_CHAT_ID'),
+            discord_bot_token=os.getenv('DISCORD_BOT_TOKEN'),
+            discord_main_channel_id=os.getenv('DISCORD_MAIN_CHANNEL_ID'),
+            discord_webhook_url=os.getenv('DISCORD_WEBHOOK_URL'),
             email_sender=os.getenv('EMAIL_SENDER'),
             email_password=os.getenv('EMAIL_PASSWORD'),
             email_receivers=[r.strip() for r in os.getenv('EMAIL_RECEIVERS', '').split(',') if r.strip()],

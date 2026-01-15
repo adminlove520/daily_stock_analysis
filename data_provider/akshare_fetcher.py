@@ -61,6 +61,10 @@ class RealtimeQuote:
     total_mv: float = 0.0        # 总市值(元)
     circ_mv: float = 0.0         # 流通市值(元)
     
+    # 资金流向
+    net_inflow_main: float = 0.0 # 主力净流入(元)
+    net_inflow_pct_main: float = 0.0 # 主力净流入占比
+    
     # 其他
     change_60d: float = 0.0      # 60日涨跌幅(%)
     high_52w: float = 0.0        # 52周最高
@@ -716,6 +720,29 @@ class AkshareFetcher(BaseFetcher):
             logger.error(f"[API错误] 获取 {stock_code} 筹码分布失败: {e}")
             return None
     
+    def get_money_flow(self, stock_code: str) -> Dict[str, Any]:
+        """
+        获取个股当日资金流向数据
+        
+        数据来源：ak.stock_individual_fund_flow_rank()
+        """
+        import akshare as ak
+        try:
+            # 这个接口返回全市场的，我们需要过滤
+            df = ak.stock_individual_fund_flow_rank()
+            row = df[df['代码'] == stock_code]
+            if not row.empty:
+                row = row.iloc[0]
+                return {
+                    'main_net_inflow': float(row.get('今日主力净流入-净额', 0)),
+                    'main_net_inflow_pct': float(row.get('今日主力净流入-幅值', 0)),
+                    'huge_net_inflow': float(row.get('今日超大单净流入-净额', 0)),
+                    'large_net_inflow': float(row.get('今日大单净流入-净额', 0)),
+                }
+        except Exception as e:
+            logger.warning(f"获取资金流向失败: {e}")
+        return {}
+
     def get_enhanced_data(self, stock_code: str, days: int = 60) -> Dict[str, Any]:
         """
         获取增强数据（历史K线 + 实时行情 + 筹码分布）
@@ -746,6 +773,9 @@ class AkshareFetcher(BaseFetcher):
         
         # 获取筹码分布
         result['chip_distribution'] = self.get_chip_distribution(stock_code)
+        
+        # 获取资金流向
+        result['money_flow'] = self.get_money_flow(stock_code)
         
         return result
 

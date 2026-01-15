@@ -34,5 +34,8 @@ requests>=2.31.0            # HTTP 请求
 fake-useragent>=1.4.0       # 随机 User-Agent 防封禁
 httpx[socks]                # HTTP 客户端 + SOCKS 代理支持（OpenAI 可选依赖）
 
+# Discord 机器人
+discord.py>=2.3.0           # Discord Bot API
+
 # 数据库
 # SQLite 是 Python 内置，无需额外安装

@@ -75,6 +75,8 @@ jobs:
           EMAIL_RECEIVERS: ${{ secrets.EMAIL_RECEIVERS }}
           # 方式五：自定义 Webhook（支持钉钉、Discord、Slack、Bark等，多个用逗号分隔）
           CUSTOM_WEBHOOK_URLS: ${{ secrets.CUSTOM_WEBHOOK_URLS }}
+          # 方式七：Discord 专用 Webhook
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           # 方式六：飞书文档
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
