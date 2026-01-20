@@ -11,6 +11,7 @@
 """
 
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, Dict, Any, List
@@ -131,6 +132,19 @@ class MarketAnalyzer:
         # self._get_north_flow(overview)
         
         return overview
+
+    def _call_akshare_with_retry(self, fn, name: str, attempts: int = 2):
+        last_error: Optional[Exception] = None
+        for attempt in range(1, attempts + 1):
+            try:
+                return fn()
+            except Exception as e:
+                last_error = e
+                logger.warning(f"[大盘] {name} 获取失败 (attempt {attempt}/{attempts}): {e}")
+                if attempt < attempts:
+                    time.sleep(min(2 ** attempt, 5))
+        logger.error(f"[大盘] {name} 最终失败: {last_error}")
+        return None
     
     def _get_main_indices(self) -> List[MarketIndex]:
         """获取主要指数实时行情 (切换为新浪接口以支持深市指数)"""
@@ -139,8 +153,8 @@ class MarketAnalyzer:
         try:
             logger.info("[大盘] 获取主要指数行情 (Sina)...")
             
-            # 使用 akshare 获取指数行情（新浪接口支持带 sh/sz 的代码）
-            df = ak.stock_zh_index_spot_sina()
+            # 使用 akshare 获取指数行情（新浪财经接口，包含深市指数）
+            df = self._call_akshare_with_retry(ak.stock_zh_index_spot_sina, "指数行情", attempts=2)
             
             if df is not None and not df.empty:
                 for code_with_prefix, name in self.MAIN_INDICES.items():
@@ -185,7 +199,7 @@ class MarketAnalyzer:
             logger.info("[大盘] 获取市场涨跌统计...")
             
             # 获取全部A股实时行情
-            df = ak.stock_zh_a_spot_em()
+            df = self._call_akshare_with_retry(ak.stock_zh_a_spot_em, "A股实时行情", attempts=2)
             
             if df is not None and not df.empty:
                 # 涨跌统计
@@ -219,7 +233,7 @@ class MarketAnalyzer:
             logger.info("[大盘] 获取板块涨跌榜...")
             
             # 获取行业板块行情
-            df = ak.stock_board_industry_name_em()
+            df = self._call_akshare_with_retry(ak.stock_board_industry_name_em, "行业板块行情", attempts=2)
             
             if df is not None and not df.empty:
                 change_col = '涨跌幅'
@@ -281,9 +295,11 @@ class MarketAnalyzer:
                 logger.info(f"[大盘] 北向资金获取成功: {overview.north_flow:.2f}亿")
             else:
                 logger.warning("[大盘] 所有北向资金接口均返回为空")
-                
         except Exception as e:
             logger.warning(f"[大盘] 获取北向资金失败: {e}")
+                
+    #     except Exception as e:
+    #         logger.warning(f"[大盘] 获取北向资金失败: {e}")
     
     def search_market_news(self) -> List[Dict]:
         """

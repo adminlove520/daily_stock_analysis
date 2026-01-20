@@ -344,6 +344,192 @@ class SerpAPISearchProvider(BaseSearchProvider):
             return '未知来源'
 
 
+class BochaSearchProvider(BaseSearchProvider):
+    """
+    博查搜索引擎
+    
+    特点：
+    - 专为AI优化的中文搜索API
+    - 结果准确、摘要完整
+    - 支持时间范围过滤和AI摘要
+    - 兼容Bing Search API格式
+    
+    文档：https://bocha-ai.feishu.cn/wiki/RXEOw02rFiwzGSkd9mUcqoeAnNK
+    """
+    
+    def __init__(self, api_keys: List[str]):
+        super().__init__(api_keys, "Bocha")
+    
+    def _do_search(self, query: str, api_key: str, max_results: int) -> SearchResponse:
+        """执行博查搜索"""
+        try:
+            import requests
+        except ImportError:
+            return SearchResponse(
+                query=query,
+                results=[],
+                provider=self.name,
+                success=False,
+                error_message="requests 未安装，请运行: pip install requests"
+            )
+        
+        try:
+            # API 端点
+            url = "https://api.bocha.cn/v1/web-search"
+            
+            # 请求头
+            headers = {
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json'
+            }
+            
+            # 请求参数（严格按照API文档）
+            payload = {
+                "query": query,
+                "freshness": "oneMonth",  # 搜索近一个月，适合捕获财报、公告等信息
+                "summary": True,  # 启用AI摘要
+                "count": min(max_results, 50)  # 最大50条
+            }
+            
+            # 执行搜索
+            response = requests.post(url, headers=headers, json=payload, timeout=10)
+            
+            # 检查HTTP状态码
+            if response.status_code != 200:
+                # 尝试解析错误信息
+                try:
+                    if response.headers.get('content-type', '').startswith('application/json'):
+                        error_data = response.json()
+                        error_message = error_data.get('message', response.text)
+                    else:
+                        error_message = response.text
+                except:
+                    error_message = response.text
+                
+                # 根据错误码处理
+                if response.status_code == 403:
+                    error_msg = f"余额不足: {error_message}"
+                elif response.status_code == 401:
+                    error_msg = f"API KEY无效: {error_message}"
+                elif response.status_code == 400:
+                    error_msg = f"请求参数错误: {error_message}"
+                elif response.status_code == 429:
+                    error_msg = f"请求频率达到限制: {error_message}"
+                else:
+                    error_msg = f"HTTP {response.status_code}: {error_message}"
+                
+                logger.warning(f"[Bocha] 搜索失败: {error_msg}")
+                
+                return SearchResponse(
+                    query=query,
+                    results=[],
+                    provider=self.name,
+                    success=False,
+                    error_message=error_msg
+                )
+            
+            # 解析响应
+            try:
+                data = response.json()
+            except ValueError as e:
+                error_msg = f"响应JSON解析失败: {str(e)}"
+                logger.error(f"[Bocha] {error_msg}")
+                return SearchResponse(
+                    query=query,
+                    results=[],
+                    provider=self.name,
+                    success=False,
+                    error_message=error_msg
+                )
+            
+            # 检查响应code
+            if data.get('code') != 200:
+                error_msg = data.get('msg') or f"API返回错误码: {data.get('code')}"
+                return SearchResponse(
+                    query=query,
+                    results=[],
+                    provider=self.name,
+                    success=False,
+                    error_message=error_msg
+                )
+            
+            # 记录原始响应到日志
+            logger.info(f"[Bocha] 搜索完成，query='{query}'")
+            logger.debug(f"[Bocha] 原始响应: {data}")
+            
+            # 解析搜索结果
+            results = []
+            web_pages = data.get('data', {}).get('webPages', {})
+            value_list = web_pages.get('value', [])
+            
+            for item in value_list[:max_results]:
+                # 优先使用summary（AI摘要），fallback到snippet
+                snippet = item.get('summary') or item.get('snippet', '')
+                
+                # 截取摘要长度
+                if snippet:
+                    snippet = snippet[:500]
+                
+                results.append(SearchResult(
+                    title=item.get('name', ''),
+                    snippet=snippet,
+                    url=item.get('url', ''),
+                    source=item.get('siteName') or self._extract_domain(item.get('url', '')),
+                    published_date=item.get('datePublished'),  # UTC+8格式，无需转换
+                ))
+            
+            logger.info(f"[Bocha] 成功解析 {len(results)} 条结果")
+            
+            return SearchResponse(
+                query=query,
+                results=results,
+                provider=self.name,
+                success=True,
+            )
+            
+        except requests.exceptions.Timeout:
+            error_msg = "请求超时"
+            logger.error(f"[Bocha] {error_msg}")
+            return SearchResponse(
+                query=query,
+                results=[],
+                provider=self.name,
+                success=False,
+                error_message=error_msg
+            )
+        except requests.exceptions.RequestException as e:
+            error_msg = f"网络请求失败: {str(e)}"
+            logger.error(f"[Bocha] {error_msg}")
+            return SearchResponse(
+                query=query,
+                results=[],
+                provider=self.name,
+                success=False,
+                error_message=error_msg
+            )
+        except Exception as e:
+            error_msg = f"未知错误: {str(e)}"
+            logger.error(f"[Bocha] {error_msg}")
+            return SearchResponse(
+                query=query,
+                results=[],
+                provider=self.name,
+                success=False,
+                error_message=error_msg
+            )
+    
+    @staticmethod
+    def _extract_domain(url: str) -> str:
+        """从 URL 提取域名作为来源"""
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            domain = parsed.netloc.replace('www.', '')
+            return domain or '未知来源'
+        except:
+            return '未知来源'
+
+
 class SearchService:
     """
     搜索服务
@@ -356,6 +542,7 @@ class SearchService:
     
     def __init__(
         self,
+        bocha_keys: Optional[List[str]] = None,
         tavily_keys: Optional[List[str]] = None,
         serpapi_keys: Optional[List[str]] = None,
     ):
@@ -363,18 +550,24 @@ class SearchService:
         初始化搜索服务
         
         Args:
+            bocha_keys: 博查搜索 API Key 列表
             tavily_keys: Tavily API Key 列表
             serpapi_keys: SerpAPI Key 列表
         """
         self._providers: List[BaseSearchProvider] = []
         
         # 初始化搜索引擎（按优先级排序）
-        # Tavily 优先（免费额度更多，每月 1000 次）
+        # 1. Bocha 优先（中文搜索优化，AI摘要）
+        if bocha_keys:
+            self._providers.append(BochaSearchProvider(bocha_keys))
+            logger.info(f"已配置 Bocha 搜索，共 {len(bocha_keys)} 个 API Key")
+        
+        # 2. Tavily（免费额度更多，每月 1000 次）
         if tavily_keys:
             self._providers.append(TavilySearchProvider(tavily_keys))
             logger.info(f"已配置 Tavily 搜索，共 {len(tavily_keys)} 个 API Key")
         
-        # SerpAPI 作为备选（每月 100 次）
+        # 3. SerpAPI 作为备选（每月 100 次）
         if serpapi_keys:
             self._providers.append(SerpAPISearchProvider(serpapi_keys))
             logger.info(f"已配置 SerpAPI 搜索，共 {len(serpapi_keys)} 个 API Key")
@@ -661,6 +854,7 @@ def get_search_service() -> SearchService:
         config = get_config()
         
         _search_service = SearchService(
+            bocha_keys=config.bocha_api_keys,
             tavily_keys=config.tavily_api_keys,
             serpapi_keys=config.serpapi_keys,
         )

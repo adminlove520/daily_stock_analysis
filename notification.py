@@ -12,6 +12,7 @@ A股自选股智能分析系统 - 通知层
    - 飞书 Webhook
    - Telegram Bot
    - 邮件 SMTP
+   - Pushover（手机/桌面推送）
 """
 
 import logging
@@ -39,6 +40,7 @@ class NotificationChannel(Enum):
     FEISHU = "feishu"      # 飞书
     TELEGRAM = "telegram"  # Telegram
     EMAIL = "email"        # 邮件
+    PUSHOVER = "pushover"  # Pushover（手机/桌面推送）
     CUSTOM = "custom"      # 自定义 Webhook
     DISCORD = "discord"    # Discord 机器人 (Bot)
     UNKNOWN = "unknown"    # 未知
@@ -48,6 +50,7 @@ class NotificationChannel(Enum):
 SMTP_CONFIGS = {
     # QQ邮箱
     "qq.com": {"server": "smtp.qq.com", "port": 465, "ssl": True},
+    "foxmail.com": {"server": "smtp.qq.com", "port": 465, "ssl": True},
     # 网易邮箱
     "163.com": {"server": "smtp.163.com", "port": 465, "ssl": True},
     "126.com": {"server": "smtp.126.com", "port": 465, "ssl": True},
@@ -83,6 +86,7 @@ class ChannelDetector:
             NotificationChannel.FEISHU: "飞书",
             NotificationChannel.TELEGRAM: "Telegram",
             NotificationChannel.EMAIL: "邮件",
+            NotificationChannel.PUSHOVER: "Pushover",
             NotificationChannel.CUSTOM: "自定义Webhook",
             NotificationChannel.DISCORD: "Discord机器人",
             NotificationChannel.UNKNOWN: "未知渠道",
@@ -104,6 +108,7 @@ class NotificationService:
     - 飞书 Webhook
     - Telegram Bot
     - 邮件 SMTP
+    - Pushover（手机/桌面推送）
     
     注意：所有已配置的渠道都会收到推送
     """
@@ -133,8 +138,15 @@ class NotificationService:
             'receivers': config.email_receivers or ([config.email_sender] if config.email_sender else []),
         }
         
+        # Pushover 配置
+        self._pushover_config = {
+            'user_key': getattr(config, 'pushover_user_key', None),
+            'api_token': getattr(config, 'pushover_api_token', None),
+        }
+        
         # 自定义 Webhook 配置
         self._custom_webhook_urls = getattr(config, 'custom_webhook_urls', []) or []
+        self._custom_webhook_bearer_token = getattr(config, 'custom_webhook_bearer_token', None)
         
         # Discord 配置
         self._discord_config = {
@@ -181,6 +193,10 @@ class NotificationService:
         if self._is_email_configured():
             channels.append(NotificationChannel.EMAIL)
         
+        # Pushover
+        if self._is_pushover_configured():
+            channels.append(NotificationChannel.PUSHOVER)
+        
         # 自定义 Webhook
         if self._custom_webhook_urls:
             channels.append(NotificationChannel.CUSTOM)
@@ -205,6 +221,10 @@ class NotificationService:
     def _is_email_configured(self) -> bool:
         """检查邮件配置是否完整（只需邮箱和授权码）"""
         return bool(self._email_config['sender'] and self._email_config['password'])
+    
+    def _is_pushover_configured(self) -> bool:
+        """检查 Pushover 配置是否完整"""
+        return bool(self._pushover_config['user_key'] and self._pushover_config['api_token'])
     
     def is_available(self) -> bool:
         """检查通知服务是否可用（至少有一个渠道）"""
@@ -847,11 +867,6 @@ class NotificationService:
         
         content = "\n".join(lines)
         
-        # 检查长度
-        if len(content) > 3800:
-            logger.warning(f"仪表盘超长({len(content)}字符)，截断")
-            content = content[:3800] + "\n...(已截断)"
-        
         return content
     
     def generate_wechat_summary(self, results: List[AnalysisResult]) -> str:
@@ -916,12 +931,119 @@ class NotificationService:
         
         content = "\n".join(lines)
         
-        # 最终检查长度
-        if len(content) > 3800:
-            logger.warning(f"精简报告仍超长({len(content)}字符)，进行截断")
-            content = content[:3800] + "\n\n...(内容过长已截断)"
-        
         return content
+    
+    def generate_single_stock_report(self, result: AnalysisResult) -> str:
+        """
+        生成单只股票的分析报告（用于单股推送模式 #55）
+        
+        格式精简但信息完整，适合每分析完一只股票立即推送
+        
+        Args:
+            result: 单只股票的分析结果
+            
+        Returns:
+            Markdown 格式的单股报告
+        """
+        report_date = datetime.now().strftime('%Y-%m-%d %H:%M')
+        signal_text, signal_emoji, _ = self._get_signal_level(result)
+        dashboard = result.dashboard if hasattr(result, 'dashboard') and result.dashboard else {}
+        core = dashboard.get('core_conclusion', {}) if dashboard else {}
+        battle = dashboard.get('battle_plan', {}) if dashboard else {}
+        intel = dashboard.get('intelligence', {}) if dashboard else {}
+        
+        # 股票名称
+        stock_name = result.name if result.name and not result.name.startswith('股票') else f'股票{result.code}'
+        
+        lines = [
+            f"## {signal_emoji} {stock_name} ({result.code})",
+            "",
+            f"> {report_date} | 评分: **{result.sentiment_score}** | {result.trend_prediction}",
+            "",
+        ]
+        
+        # 核心决策（一句话）
+        one_sentence = core.get('one_sentence', result.analysis_summary) if core else result.analysis_summary
+        if one_sentence:
+            lines.extend([
+                "### 📌 核心结论",
+                "",
+                f"**{signal_text}**: {one_sentence}",
+                "",
+            ])
+        
+        # 重要信息（舆情+基本面）
+        info_added = False
+        if intel:
+            if intel.get('earnings_outlook'):
+                if not info_added:
+                    lines.append("### 📰 重要信息")
+                    lines.append("")
+                    info_added = True
+                lines.append(f"📊 **业绩预期**: {intel['earnings_outlook'][:100]}")
+            
+            if intel.get('sentiment_summary'):
+                if not info_added:
+                    lines.append("### 📰 重要信息")
+                    lines.append("")
+                    info_added = True
+                lines.append(f"💭 **舆情情绪**: {intel['sentiment_summary'][:80]}")
+            
+            # 风险警报
+            risks = intel.get('risk_alerts', [])
+            if risks:
+                if not info_added:
+                    lines.append("### 📰 重要信息")
+                    lines.append("")
+                    info_added = True
+                lines.append("")
+                lines.append("🚨 **风险警报**:")
+                for risk in risks[:3]:
+                    lines.append(f"- {risk[:60]}")
+            
+            # 利好催化
+            catalysts = intel.get('positive_catalysts', [])
+            if catalysts:
+                lines.append("")
+                lines.append("✨ **利好催化**:")
+                for cat in catalysts[:3]:
+                    lines.append(f"- {cat[:60]}")
+        
+        if info_added:
+            lines.append("")
+        
+        # 狙击点位
+        sniper = battle.get('sniper_points', {}) if battle else {}
+        if sniper:
+            lines.extend([
+                "### 🎯 操作点位",
+                "",
+                "| 买点 | 止损 | 目标 |",
+                "|------|------|------|",
+            ])
+            ideal_buy = sniper.get('ideal_buy', '-')
+            stop_loss = sniper.get('stop_loss', '-')
+            take_profit = sniper.get('take_profit', '-')
+            lines.append(f"| {ideal_buy} | {stop_loss} | {take_profit} |")
+            lines.append("")
+        
+        # 持仓建议
+        pos_advice = core.get('position_advice', {}) if core else {}
+        if pos_advice:
+            lines.extend([
+                "### 💼 持仓建议",
+                "",
+                f"- 🆕 **空仓者**: {pos_advice.get('no_position', result.operation_advice)}",
+                f"- 💼 **持仓者**: {pos_advice.get('has_position', '继续持有')}",
+                "",
+            ])
+        
+        lines.extend([
+            "---",
+            "*AI生成，仅供参考，不构成投资建议*",
+        ])
+        
+        return "\n".join(lines)
     
     def send_to_wechat(self, content: str) -> bool:
         """
@@ -1172,6 +1294,8 @@ class NotificationService:
             }
         }
         
+        说明：飞书文本消息不会渲染 Markdown，需使用交互卡片（lark_md）格式
+        
         注意：飞书文本消息限制约 20KB，超长内容会自动分批发送
         可通过环境变量 FEISHU_MAX_BYTES 调整限制值
         
@@ -1185,16 +1309,19 @@ class NotificationService:
             logger.warning("飞书 Webhook 未配置，跳过推送")
             return False
         
+        # 飞书 lark_md 支持有限，先做格式转换
+        formatted_content = self._format_feishu_markdown(content)
+
         max_bytes = self._feishu_max_bytes  # 从配置读取，默认 20000 字节
         
         # 检查字节长度，超长则分批发送
-        content_bytes = len(content.encode('utf-8'))
+        content_bytes = len(formatted_content.encode('utf-8'))
         if content_bytes > max_bytes:
             logger.info(f"飞书消息内容超长({content_bytes}字节/{len(content)}字符)，将分批发送")
-            return self._send_feishu_chunked(content, max_bytes)
+            return self._send_feishu_chunked(formatted_content, max_bytes)
         
         try:
-            return self._send_feishu_message(content)
+            return self._send_feishu_message(formatted_content)
         except Exception as e:
             logger.error(f"发送飞书消息失败: {e}")
             return False
@@ -1346,42 +1473,140 @@ class NotificationService:
         return success_count == total_chunks
     
     def _send_feishu_message(self, content: str) -> bool:
-        """发送单条飞书消息"""
-        payload = {
+        """发送单条飞书消息（优先使用 Markdown 卡片）"""
+        def _post_payload(payload: Dict[str, Any]) -> bool:
+            logger.debug(f"飞书请求 URL: {self._feishu_url}")
+            logger.debug(f"飞书请求 payload 长度: {len(content)} 字符")
+
+            response = requests.post(
+                self._feishu_url,
+                json=payload,
+                timeout=30
+            )
+
+            logger.debug(f"飞书响应状态码: {response.status_code}")
+            logger.debug(f"飞书响应内容: {response.text}")
+
+            if response.status_code == 200:
+                result = response.json()
+                code = result.get('code') if 'code' in result else result.get('StatusCode')
+                if code == 0:
+                    logger.info("飞书消息发送成功")
+                    return True
+                else:
+                    error_msg = result.get('msg') or result.get('StatusMessage', '未知错误')
+                    error_code = result.get('code') or result.get('StatusCode', 'N/A')
+                    logger.error(f"飞书返回错误 [code={error_code}]: {error_msg}")
+                    logger.error(f"完整响应: {result}")
+                    return False
+            else:
+                logger.error(f"飞书请求失败: HTTP {response.status_code}")
+                logger.error(f"响应内容: {response.text}")
+                return False
+
+        # 1) 优先使用交互卡片（支持 Markdown 渲染）
+        card_payload = {
+            "msg_type": "interactive",
+            "card": {
+                "config": {"wide_screen_mode": True},
+                "header": {
+                    "title": {
+                        "tag": "plain_text",
+                        "content": "A股智能分析报告"
+                    }
+                },
+                "elements": [
+                    {
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": content
+                        }
+                    }
+                ]
+            }
+        }
+
+        if _post_payload(card_payload):
+            return True
+
+        # 2) 回退为普通文本消息
+        text_payload = {
             "msg_type": "text",
             "content": {
                 "text": content
             }
         }
-        
-        logger.debug(f"飞书请求 URL: {self._feishu_url}")
-        logger.debug(f"飞书请求 payload 长度: {len(content)} 字符")
-        
-        response = requests.post(
-            self._feishu_url,
-            json=payload,
-            timeout=30
-        )
-        
-        logger.debug(f"飞书响应状态码: {response.status_code}")
-        logger.debug(f"飞书响应内容: {response.text}")
-        
-        if response.status_code == 200:
-            result = response.json()
-            code = result.get('code') if 'code' in result else result.get('StatusCode')
-            if code == 0:
-                logger.info("飞书消息发送成功")
-                return True
-            else:
-                error_msg = result.get('msg') or result.get('StatusMessage', '未知错误')
-                error_code = result.get('code') or result.get('StatusCode', 'N/A')
-                logger.error(f"飞书返回错误 [code={error_code}]: {error_msg}")
-                logger.error(f"完整响应: {result}")
-                return False
-        else:
-            logger.error(f"飞书请求失败: HTTP {response.status_code}")
-            logger.error(f"响应内容: {response.text}")
-            return False
+
+        return _post_payload(text_payload)
+
+    def _format_feishu_markdown(self, content: str) -> str:
+        """
+        将通用 Markdown 转换为飞书 lark_md 更友好的格式
+        - 飞书不支持 Markdown 标题（# / ## / ###），用加粗代替
+        - 引用块使用前缀替代
+        - 分隔线统一为细线
+        - 表格转换为条目列表
+        """
+        def _flush_table_rows(buffer: List[str], output: List[str]) -> None:
+            if not buffer:
+                return
+
+            def _parse_row(row: str) -> List[str]:
+                cells = [c.strip() for c in row.strip().strip('|').split('|')]
+                return [c for c in cells if c]
+
+            rows = []
+            for raw in buffer:
+                if re.match(r'^\s*\|?\s*[:-]+\s*(\|\s*[:-]+\s*)+\|?\s*$', raw):
+                    continue
+                parsed = _parse_row(raw)
+                if parsed:
+                    rows.append(parsed)
+
+            if not rows:
+                return
+
+            header = rows[0]
+            data_rows = rows[1:] if len(rows) > 1 else []
+            for row in data_rows:
+                pairs = []
+                for idx, cell in enumerate(row):
+                    key = header[idx] if idx < len(header) else f"列{idx + 1}"
+                    pairs.append(f"{key}：{cell}")
+                output.append(f"• {' | '.join(pairs)}")
+
+        lines = []
+        table_buffer: List[str] = []
+
+        for raw_line in content.splitlines():
+            line = raw_line.rstrip()
+
+            if line.strip().startswith('|'):
+                table_buffer.append(line)
+                continue
+
+            if table_buffer:
+                _flush_table_rows(table_buffer, lines)
+                table_buffer = []
+
+            if re.match(r'^#{1,6}\s+', line):
+                title = re.sub(r'^#{1,6}\s+', '', line).strip()
+                line = f"**{title}**" if title else ""
+            elif line.startswith('> '):
+                quote = line[2:].strip()
+                line = f"💬 {quote}" if quote else ""
+            elif line.strip() == '---':
+                line = '────────'
+            elif line.startswith('- '):
+                line = f"• {line[2:].strip()}"
+
+            lines.append(line)
+
+        if table_buffer:
+            _flush_table_rows(table_buffer, lines)
+
+        return "\n".join(lines).strip()
     
     def send_to_email(self, content: str, subject: Optional[str] = None) -> bool:
         """
@@ -1670,6 +1895,216 @@ class NotificationService:
         
         return result
     
+    def send_to_pushover(self, content: str, title: Optional[str] = None) -> bool:
+        """
+        推送消息到 Pushover
+        
+        Pushover API 格式：
+        POST https://api.pushover.net/1/messages.json
+        {
+            "token": "应用 API Token",
+            "user": "用户 Key",
+            "message": "消息内容",
+            "title": "标题（可选）"
+        }
+        
+        Pushover 特点：
+        - 支持 iOS/Android/桌面多平台推送
+        - 消息限制 1024 字符
+        - 支持优先级设置
+        - 支持 HTML 格式
+        
+        Args:
+            content: 消息内容（Markdown 格式，会转为纯文本）
+            title: 消息标题（可选，默认为"股票分析报告"）
+            
+        Returns:
+            是否发送成功
+        """
+        if not self._is_pushover_configured():
+            logger.warning("Pushover 配置不完整，跳过推送")
+            return False
+        
+        user_key = self._pushover_config['user_key']
+        api_token = self._pushover_config['api_token']
+        
+        # Pushover API 端点
+        api_url = "https://api.pushover.net/1/messages.json"
+        
+        # 处理消息标题
+        if title is None:
+            date_str = datetime.now().strftime('%Y-%m-%d')
+            title = f"📈 股票分析报告 - {date_str}"
+        
+        # Pushover 消息限制 1024 字符
+        max_length = 1024
+        
+        # 转换 Markdown 为纯文本（Pushover 支持 HTML，但纯文本更通用）
+        plain_content = self._markdown_to_plain_text(content)
+        
+        if len(plain_content) <= max_length:
+            # 单条消息发送
+            return self._send_pushover_message(api_url, user_key, api_token, plain_content, title)
+        else:
+            # 分段发送长消息
+            return self._send_pushover_chunked(api_url, user_key, api_token, plain_content, title, max_length)
+    
+    def _markdown_to_plain_text(self, markdown_text: str) -> str:
+        """
+        将 Markdown 转换为纯文本
+        
+        移除 Markdown 格式标记，保留可读性
+        """
+        text = markdown_text
+        
+        # 移除标题标记 # ## ###
+        text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
+        
+        # 移除加粗 **text** -> text
+        text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+        
+        # 移除斜体 *text* -> text
+        text = re.sub(r'\*(.+?)\*', r'\1', text)
+        
+        # 移除引用 > text -> text
+        text = re.sub(r'^>\s+', '', text, flags=re.MULTILINE)
+        
+        # 移除列表标记 - item -> item
+        text = re.sub(r'^[-*]\s+', '• ', text, flags=re.MULTILINE)
+        
+        # 移除分隔线 ---
+        text = re.sub(r'^---+$', '────────', text, flags=re.MULTILINE)
+        
+        # 移除表格语法 |---|---|
+        text = re.sub(r'\|[-:]+\|[-:|\s]+\|', '', text)
+        text = re.sub(r'^\|(.+)\|$', r'\1', text, flags=re.MULTILINE)
+        
+        # 清理多余空行
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        
+        return text.strip()
+    
+    def _send_pushover_message(
+        self, 
+        api_url: str, 
+        user_key: str, 
+        api_token: str, 
+        message: str, 
+        title: str,
+        priority: int = 0
+    ) -> bool:
+        """
+        发送单条 Pushover 消息
+        
+        Args:
+            api_url: Pushover API 端点
+            user_key: 用户 Key
+            api_token: 应用 API Token
+            message: 消息内容
+            title: 消息标题
+            priority: 优先级 (-2 ~ 2，默认 0)
+        """
+        try:
+            payload = {
+                "token": api_token,
+                "user": user_key,
+                "message": message,
+                "title": title,
+                "priority": priority,
+            }
+            
+            response = requests.post(api_url, data=payload, timeout=30)
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('status') == 1:
+                    logger.info("Pushover 消息发送成功")
+                    return True
+                else:
+                    errors = result.get('errors', ['未知错误'])
+                    logger.error(f"Pushover 返回错误: {errors}")
+                    return False
+            else:
+                logger.error(f"Pushover 请求失败: HTTP {response.status_code}")
+                logger.debug(f"响应内容: {response.text}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"发送 Pushover 消息失败: {e}")
+            return False
+    
+    def _send_pushover_chunked(
+        self, 
+        api_url: str, 
+        user_key: str, 
+        api_token: str, 
+        content: str, 
+        title: str,
+        max_length: int
+    ) -> bool:
+        """
+        分段发送长 Pushover 消息
+        
+        按段落分割，确保每段不超过最大长度
+        """
+        import time
+        
+        # 按段落（分隔线或双换行）分割
+        if "────────" in content:
+            sections = content.split("────────")
+            separator = "────────"
+        else:
+            sections = content.split("\n\n")
+            separator = "\n\n"
+        
+        chunks = []
+        current_chunk = []
+        current_length = 0
+        
+        for section in sections:
+            # 计算添加这个 section 后的实际长度
+            # join() 只在元素之间放置分隔符，不是每个元素后面
+            # 所以：第一个元素不需要分隔符，后续元素需要一个分隔符连接
+            if current_chunk:
+                # 已有元素，添加新元素需要：当前长度 + 分隔符 + 新 section
+                new_length = current_length + len(separator) + len(section)
+            else:
+                # 第一个元素，不需要分隔符
+                new_length = len(section)
+            
+            if new_length > max_length:
+                if current_chunk:
+                    chunks.append(separator.join(current_chunk))
+                current_chunk = [section]
+                current_length = len(section)
+            else:
+                current_chunk.append(section)
+                current_length = new_length
+        
+        if current_chunk:
+            chunks.append(separator.join(current_chunk))
+        
+        total_chunks = len(chunks)
+        success_count = 0
+        
+        logger.info(f"Pushover 分批发送：共 {total_chunks} 批")
+        
+        for i, chunk in enumerate(chunks):
+            # 添加分页标记到标题
+            chunk_title = f"{title} ({i+1}/{total_chunks})" if total_chunks > 1 else title
+            
+            if self._send_pushover_message(api_url, user_key, api_token, chunk, chunk_title):
+                success_count += 1
+                logger.info(f"Pushover 第 {i+1}/{total_chunks} 批发送成功")
+            else:
+                logger.error(f"Pushover 第 {i+1}/{total_chunks} 批发送失败")
+            
+            # 批次间隔，避免触发频率限制
+            if i < total_chunks - 1:
+                time.sleep(1)
+        
+        return success_count == total_chunks
+    
     def send_to_custom(self, content: str) -> bool:
         """
         推送消息到自定义 Webhook
@@ -1703,36 +2138,152 @@ class NotificationService:
                 # Slack 格式: {"text": "xxx"}
                 # Discord 格式: {"content": "xxx"}
                 
-                # 检测 URL 类型并构造对应格式
+                # 钉钉机器人对 body 有字节上限（约 20000 bytes），超长需要分批发送
+                if self._is_dingtalk_webhook(url):
+                    if self._send_dingtalk_chunked(url, content, max_bytes=20000):
+                        logger.info(f"自定义 Webhook {i+1}（钉钉）推送成功")
+                        success_count += 1
+                    else:
+                        logger.error(f"自定义 Webhook {i+1}（钉钉）推送失败")
+                    continue
+
+                # 其他 Webhook：单次发送
                 payload = self._build_custom_webhook_payload(url, content)
-                
-                headers = {
-                    'Content-Type': 'application/json',
-                    'User-Agent': 'StockAnalysis/1.0'
-                }
-                
-                body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
-                headers_with_charset = dict(headers)
-                headers_with_charset['Content-Type'] = 'application/json; charset=utf-8'
-                response = requests.post(
-                    url,
-                    data=body,
-                    headers=headers_with_charset,
-                    timeout=30
-                )
-                
-                if response.status_code == 200:
+                if self._post_custom_webhook(url, payload, timeout=30):
                     logger.info(f"自定义 Webhook {i+1} 推送成功")
                     success_count += 1
                 else:
-                    logger.error(f"自定义 Webhook {i+1} 推送失败: HTTP {response.status_code}")
-                    logger.debug(f"响应内容: {response.text[:200]}")
+                    logger.error(f"自定义 Webhook {i+1} 推送失败")
                     
             except Exception as e:
                 logger.error(f"自定义 Webhook {i+1} 推送异常: {e}")
         
         logger.info(f"自定义 Webhook 推送完成：成功 {success_count}/{len(self._custom_webhook_urls)}")
         return success_count > 0
+
+    @staticmethod
+    def _is_dingtalk_webhook(url: str) -> bool:
+        url_lower = (url or "").lower()
+        return 'dingtalk' in url_lower or 'oapi.dingtalk.com' in url_lower
+
+    def _post_custom_webhook(self, url: str, payload: dict, timeout: int = 30) -> bool:
+        headers = {
+            'Content-Type': 'application/json; charset=utf-8',
+            'User-Agent': 'StockAnalysis/1.0',
+        }
+        # 支持 Bearer Token 认证（#51）
+        if self._custom_webhook_bearer_token:
+            headers['Authorization'] = f'Bearer {self._custom_webhook_bearer_token}'
+        body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+        response = requests.post(url, data=body, headers=headers, timeout=timeout)
+        if response.status_code == 200:
+            return True
+        logger.error(f"自定义 Webhook 推送失败: HTTP {response.status_code}")
+        logger.debug(f"响应内容: {response.text[:200]}")
+        return False
+
+    def _chunk_markdown_by_bytes(self, content: str, max_bytes: int) -> List[str]:
+        def get_bytes(s: str) -> int:
+            return len(s.encode('utf-8'))
+
+        def split_by_bytes(text: str, limit: int) -> List[str]:
+            parts: List[str] = []
+            remaining = text
+            while remaining:
+                part = self._truncate_to_bytes(remaining, limit)
+                if not part:
+                    break
+                parts.append(part)
+                remaining = remaining[len(part):]
+            return parts
+
+        # 优先按分隔线/标题分割，保证分页自然
+        if "\n---\n" in content:
+            sections = content.split("\n---\n")
+            separator = "\n---\n"
+        elif "\n### " in content:
+            parts = content.split("\n### ")
+            sections = [parts[0]] + [f"### {p}" for p in parts[1:]]
+            separator = "\n"
+        else:
+            # fallback：按行拼接
+            sections = content.split("\n")
+            separator = "\n"
+
+        chunks: List[str] = []
+        current_chunk: List[str] = []
+        current_bytes = 0
+        sep_bytes = get_bytes(separator)
+
+        for section in sections:
+            section_bytes = get_bytes(section)
+            extra = sep_bytes if current_chunk else 0
+
+            # 单段超长：截断
+            if section_bytes + extra > max_bytes:
+                if current_chunk:
+                    chunks.append(separator.join(current_chunk))
+                    current_chunk = []
+                    current_bytes = 0
+
+                # 无法按结构拆分时，按字节强制拆分，避免整段被截断丢失
+                for part in split_by_bytes(section, max(200, max_bytes - 200)):
+                    chunks.append(part)
+                continue
+
+            if current_bytes + section_bytes + extra > max_bytes:
+                chunks.append(separator.join(current_chunk))
+                current_chunk = [section]
+                current_bytes = section_bytes
+            else:
+                if current_chunk:
+                    current_bytes += sep_bytes
+                current_chunk.append(section)
+                current_bytes += section_bytes
+
+        if current_chunk:
+            chunks.append(separator.join(current_chunk))
+
+        # 移除空块
+        return [c for c in (c.strip() for c in chunks) if c]
+
+    def _send_dingtalk_chunked(self, url: str, content: str, max_bytes: int = 20000) -> bool:
+        import time as _time
+
+        # 为 payload 开销预留空间，避免 body 超限
+        budget = max(1000, max_bytes - 1500)
+        chunks = self._chunk_markdown_by_bytes(content, budget)
+        if not chunks:
+            return False
+
+        total = len(chunks)
+        ok = 0
+
+        for idx, chunk in enumerate(chunks):
+            marker = f"\n\n📄 *({idx+1}/{total})*" if total > 1 else ""
+            payload = {
+                "msgtype": "markdown",
+                "markdown": {
+                    "title": "股票分析报告",
+                    "text": chunk + marker,
+                },
+            }
+
+            # 如果仍超限（极端情况下），再按字节硬截断一次
+            body_bytes = len(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
+            if body_bytes > max_bytes:
+                hard_budget = max(200, budget - (body_bytes - max_bytes) - 200)
+                payload["markdown"]["text"] = self._truncate_to_bytes(payload["markdown"]["text"], hard_budget)
+
+            if self._post_custom_webhook(url, payload, timeout=30):
+                ok += 1
+            else:
+                logger.error(f"钉钉分批发送失败: 第 {idx+1}/{total} 批")
+
+            if idx < total - 1:
+                _time.sleep(1)
+
+        return ok == total
     
     def send_to_discord(self, content: str) -> bool:
         """
@@ -1945,6 +2496,8 @@ class NotificationService:
                     result = self.send_to_telegram(content)
                 elif channel == NotificationChannel.EMAIL:
                     result = self.send_to_email(content)
+                elif channel == NotificationChannel.PUSHOVER:
+                    result = self.send_to_pushover(content)
                 elif channel == NotificationChannel.CUSTOM:
                     result = self.send_to_custom(content)
                 elif channel == NotificationChannel.DISCORD:

@@ -1,6 +1,8 @@
-# 环境变量文件（包含敏感信息）
+# 环境变量文件（包含敏感信息，禁止提交）
 .env
-.env.local
+.env.*
+*.env
+*.env.local
 .env.example
 .env.*.local
 
@@ -42,6 +44,7 @@ env/
 *.swp
 *.swo
 *~
+.cursorrules
 
 # 数据和日志
 data/
@@ -60,6 +63,8 @@ Thumbs.db
 .coverage
 htmlcov/
 
-docs/
+local/
 
 run.sh
+
+verify_*.py

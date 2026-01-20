@@ -6,7 +6,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-Ready-2088FF?logo=github-actions&logoColor=white)](https://github.com/features/actions)
 
-> 🤖 基于 AI 大模型的 A 股自选股智能分析系统，每日自动分析并推送「决策仪表盘」到企业微信/飞书/Telegram/邮箱
+> 🤖 基于 AI 大模型的 A/H 股自选股智能分析系统，每日自动分析并推送「决策仪表盘」到企业微信/飞书/Telegram/邮箱
 
 ![运行效果演示](./sources/all_2026-01-13_221547.gif)
 
@@ -23,7 +23,7 @@
 
 ### 📊 数据来源
 - **行情数据**: AkShare（免费）、Tushare、Baostock、YFinance
-- **新闻搜索**: Tavily、SerpAPI
+- **新闻搜索**: Tavily、SerpAPI、Bocha
 - **AI 分析**: 
   - 主力：Google Gemini（gemini-3-flash-preview）—— [免费获取](https://aistudio.google.com/)
   - 备选：应大家要求，也支持了OpenAI 兼容 API（DeepSeek、通义千问、Moonshot 等）
@@ -40,7 +40,7 @@
 
 **无需服务器，每天自动运行！**
 
-#### 1. Fork 本仓库
+#### 1. Fork 本仓库(顺便点下⭐呀)
 
 点击右上角 `Fork` 按钮
 
@@ -70,23 +70,13 @@
 | `EMAIL_SENDER` | 发件人邮箱（如 `xxx@qq.com`） | 可选 |
 | `EMAIL_PASSWORD` | 邮箱授权码（非登录密码） | 可选 |
 | `EMAIL_RECEIVERS` | 收件人邮箱（多个用逗号分隔，留空则发给自己） | 可选 |
-| `CUSTOM_WEBHOOK_URLS` | 自定义 Webhook（多个用逗号分隔） | 可选 |                                                                                                            | 可选 |
-| `FEISHU_APP_ID` | 飞书应用ID，需要去（[开发者后台](https://open.feishu.cn/app)创建应用，步骤参考[这里](https://blog.csdn.net/qq_38423105/article/details/149316776)） | 可选 |
-| `FEISHU_APP_SECRET` | 飞书应用APP_SECRET                                                                                                            | 可选 |
-| `FEISHU_FOLDER_TOKEN` | 飞书文档云盘文件夹Key(地址栏 folder 后面参数)  | 可选 |  
+| `CUSTOM_WEBHOOK_URLS` | 自定义 Webhook（支持钉钉等，多个用逗号分隔） | 可选 |
+| `CUSTOM_WEBHOOK_BEARER_TOKEN` | 自定义 Webhook 的 Bearer Token（用于需要认证的 Webhook） | 可选 |
+| `SINGLE_STOCK_NOTIFY` | 单股推送模式：设为 `true` 则每分析完一只股票立即推送 | 可选 |
 
-> *注：至少配置一个渠道，配置多个则同时推送到所有渠道
-> 
-> 自定义 Webhook 支持：钉钉、Discord、Slack、Bark、自建服务等任意支持 POST JSON 的 Webhook
-> 
-
-> 通过飞书应用创建的飞书文档，里面的内容不会出现已截断的情况。应用创建好后需要执行以下操作：
-> 
-> 1.Github 配置对应 Secret
-> 
-> 2.创建群组，在群组设置->群机器人，将创建的应用添加到群组内，算上飞书 Webhook，此时群组应该会有两个机器人 
-> 
-> 3.点击飞书云盘文件夹的“...”,将群组添加为协作者，权限设置为可管理
+> *注：至少配置一个渠道，配置多个则同时推送
+>
+> 📖 更多配置（Pushover 手机推送、飞书云文档等）请参考 [完整配置指南](docs/full-guide.md)
 
 **其他配置**
 
@@ -94,6 +84,7 @@
 |------------|------|:----:|
 | `STOCK_LIST` | 自选股代码，如 `600519,300750,002594` | ✅ |
 | `TAVILY_API_KEYS` | [Tavily](https://tavily.com/) 搜索 API（新闻搜索） | 推荐 |
+| `BOCHA_API_KEYS` | [博查搜索](https://open.bocha.cn/) Web Search API（中文搜索优化，支持AI摘要，多个key用逗号分隔） | 可选 |
 | `SERPAPI_API_KEYS` | [SerpAPI](https://serpapi.com/) 备用搜索 | 可选 |
 | `TUSHARE_TOKEN` | [Tushare Pro](https://tushare.pro/) Token | 可选 |
 
@@ -109,39 +100,9 @@
 
 默认每个工作日 **18:00（北京时间）** 自动执行
 
-### 方式二：本地运行
+### 方式二：本地运行 / Docker 部署
 
-```bash
-# 克隆仓库
-git clone https://github.com/ZhuLinsen/daily_stock_analysis.git
-cd daily_stock_analysis
-
-# 安装依赖
-pip install -r requirements.txt
-
-# 配置环境变量
-cp .env.example .env
-vim .env  # 填入你的 API Key
-
-# 运行
-python main.py                    # 完整分析
-python main.py --market-review    # 仅大盘复盘
-python main.py --schedule         # 定时任务模式
-```
-
-### 方式三：Docker 部署
-
-```bash
-# 配置环境变量
-cp .env.example .env
-vim .env
-
-# 一键启动
-docker-compose up -d
-
-# 查看日志
-docker-compose logs -f
-```
+> 📖 本地运行、Docker 部署详细步骤请参考 [完整配置指南](docs/full-guide.md)
 
 ## 📱 推送效果
 
@@ -185,39 +146,37 @@ docker-compose logs -f
 
 ## ⚙️ 配置说明
 
-### 环境变量
+> 📖 完整环境变量、定时任务配置请参考 [完整配置指南](docs/full-guide.md)
 
-```bash
-# === 必填 ===
-GEMINI_API_KEY=your_gemini_key          # Gemini AI
-WECHAT_WEBHOOK_URL=https://qyapi...     # 企业微信机器人
-STOCK_LIST=600519,300750,002594         # 自选股列表
+## 🖥️ 本地 WebUI（可选）
 
-# === 推荐 ===
-TAVILY_API_KEYS=your_tavily_key         # 新闻搜索
-GEMINI_MODEL=gemini-3-flash-preview     # 主模型
-GEMINI_MODEL_FALLBACK=gemini-2.5-flash  # 备选模型
+本地运行时，可启用 WebUI 来管理配置和触发分析。
 
-# === 可选 ===
-TUSHARE_TOKEN=your_token                # Tushare数据源
-SERPAPI_API_KEYS=your_serpapi_key       # 备用搜索
-```
+### 启动方式
 
-### 定时配置（GitHub Actions）
+| 命令 | 说明 |
+|------|------|
+| `python main.py --webui` | 启动 WebUI + 执行一次完整分析 |
+| `python main.py --webui-only` | 仅启动 WebUI，手动触发分析 |
 
-编辑 `.github/workflows/daily_analysis.yml`:
+- 访问地址：`http://127.0.0.1:8000`
+- 详细说明请参考 [配置指南 - WebUI](docs/full-guide.md#本地-webui-管理界面)
 
-```yaml
-schedule:
-  # UTC 时间，北京时间 = UTC + 8
-  - cron: '0 10 * * 1-5'   # 周一到周五 18:00（北京时间）
-```
+### 功能特性
 
-| 北京时间 | UTC cron |
-|---------|----------|
-| 09:30 | `'30 1 * * 1-5'` |
-| 15:00 | `'0 7 * * 1-5'` |
-| 18:00 | `'0 10 * * 1-5'` |
+- 📝 **配置管理** - 查看/修改 `.env` 里的自选股列表
+- 🚀 **快速分析** - 页面输入股票代码，一键触发分析
+- 📊 **实时进度** - 分析任务状态实时更新，支持多任务并行
+
+### API 接口
+
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/` | GET | 配置管理页面 |
+| `/health` | GET | 健康检查 |
+| `/analysis?code=xxx` | GET | 触发单只股票异步分析 |
+| `/tasks` | GET | 查询所有任务状态 |
+| `/task?id=xxx` | GET | 查询单个任务状态 |
 
 ## 📁 项目结构
 
@@ -231,11 +190,18 @@ daily_stock_analysis/
 ├── scheduler.py         # 定时任务
 ├── storage.py           # 数据存储
 ├── config.py            # 配置管理
+├── webui.py             # WebUI 入口
 ├── data_provider/       # 数据源适配器
 │   ├── akshare_fetcher.py
 │   ├── tushare_fetcher.py
 │   ├── baostock_fetcher.py
 │   └── yfinance_fetcher.py
+├── web/                 # WebUI 模块
+│   ├── server.py        # HTTP 服务器
+│   ├── router.py        # 路由管理
+│   ├── handlers.py      # 请求处理器
+│   ├── services.py      # 业务服务
+│   └── templates.py     # HTML 模板
 ├── .github/workflows/   # GitHub Actions
 ├── Dockerfile           # Docker 镜像
 └── docker-compose.yml   # Docker 编排
@@ -251,18 +217,11 @@ daily_stock_analysis/
 - [x] Telegram Bot
 - [x] 邮件通知（SMTP）
 - [x] 自定义 Webhook（支持钉钉、Discord、Slack、Bark 等）
-- [ ] iOS/Android 推送（Pushover）
+- [x] iOS/Android 推送（Pushover）
 
 ### 🤖 AI 模型支持
 - [x] Google Gemini（主力，免费额度）
-- [x] OpenAI 兼容 API（支持以下模型）
-  - [x] OpenAI GPT-4/4o
-  - [x] DeepSeek
-  - [x] 通义千问
-  - [x] Moonshot（月之暗面）
-  - [x] 智谱 GLM
-- [ ] Claude
-- [ ] 文心一言
+- [x] OpenAI 兼容 API（支持 GPT-4/DeepSeek/通义千问/Claude/文心一言 等）
 - [x] 本地模型（Ollama）
 
 ### 📊 数据源扩展
@@ -270,20 +229,16 @@ daily_stock_analysis/
 - [x] Tushare Pro
 - [x] Baostock
 - [x] YFinance
-- [ ] 东方财富 API
-- [ ] 同花顺 API
-- [ ] 新浪财经
 
 ### 🎯 功能增强
 - [x] 决策仪表盘
 - [x] 大盘复盘
 - [x] 定时推送
 - [x] GitHub Actions
-- [ ] Web 管理界面
-- [ ] 自选股动态管理 API
+- [x] 港股支持
+- [x] Web 管理界面 (简易版)
 - [ ] 历史分析回测
-- [ ] 多策略支持
-- [ ] 港股/美股支持
+- [ ] 美股支持
 
 ## 🤝 贡献
 
@@ -318,3 +273,15 @@ daily_stock_analysis/
 ---
 
 **如果觉得有用，请给个 ⭐ Star 支持一下！**
+
+<!-- 赞赏锚点 -->
+<a id="sponsor"></a>
+###### ☕ 请我喝杯咖啡
+- 如果觉得本项目对你有帮助且行有余力，可以请我喝杯咖啡，支持项目的持续维护与迭代；不赞赏也完全不影响使用。   
+<small>（赞赏时可备注联系方式，方便私信致谢与后续交流反馈）</small>
+- 感谢支持, 祝您股市长虹，拿主力当提款机。
+
+<div align="center">
+  <img src="./sources/wechatpay.jpg" alt="WeChat Pay" width="200" style="margin-right: 20px;">
+  <img src="./sources/alipay.jpg" alt="Alipay" width="200">
+</div>
